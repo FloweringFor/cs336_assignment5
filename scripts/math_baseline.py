@@ -17,7 +17,7 @@ R1_ZERO_SYSTEM_PROMPT = (
 
 
 def format_prompt(question):
-    return f"{R1_ZERO_SYSTEM_PROMPT}\nUser: {question}\nAssistant: <think>"
+    return f"{R1_ZERO_SYSTEM_PROMPT}\n\nUser: {question}\nAssistant: <think>"
 
 
 def evaluate_vllm(
