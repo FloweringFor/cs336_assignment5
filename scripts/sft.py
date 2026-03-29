@@ -130,8 +130,8 @@ def log_generations(
     model.eval()
 
     # 1. 准备输入 (仅针对 Prompt 部分进行编码，用于 generate)
-    inputs = tokenizer(prompt_strs, return_tensor="pt", padding=True)
-    inputs_ids = inputs.inputs_ids
+    inputs = tokenizer(prompt_strs, return_tensors="pt", padding=True).to(device)
+    inputs_ids = inputs.input_ids
     attention_mask = inputs.attention_mask
 
     # 2. 模型生成响应
