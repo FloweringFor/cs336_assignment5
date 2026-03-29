@@ -1,6 +1,8 @@
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedTokenizer, PreTrainedModel
 import torch.functional as F
+from cs336_alignment.drgrpo_grader import r1_zero_reward_fn
+
 
 """
 model_id = "Qwen/Qwen2.5-Math-1.5B"
@@ -112,3 +114,75 @@ def sft_microbatch_train_step(
     }
     return loss_for_backward.detach(), meta_data
 
+
+@torch.no_grad()
+def log_generations(
+        model,
+        tokenizer,
+        prompt_strs: list[str],
+        output_strs: list[str],
+        generation_config: dict,
+        device: str = "cuda"
+) -> dict:
+    model.eval()
+
+    # 1. 准备输入 (仅针对 Prompt 部分进行编码，用于 generate)
+    inputs = tokenizer(prompt_strs, return_tensor="pt", padding=True)
+    inputs_ids = inputs.inputs_ids
+    attention_mask = inputs.attention_mask
+
+    # 2. 模型生成响应
+    generate_outputs = model.generate(
+        inputs_ids=inputs_ids,
+        attention_mask=attention_mask,
+        **generation_config,
+        return_dict_in_generate=True,
+        output_scores=True
+    )
+
+    gen_tokens = generate_outputs.sequences[:, inputs_ids.shape[-1]:]
+    generated_responses = tokenizer.batch_decode(gen_tokens, skip_special_tokens=True)
+
+    # 3. 计算 Token Entropy (平均标记熵)
+    # scores 是一个元组，长度为生成步数，每个元素为 (batch_size, vocab_size)
+    logits = torch.stack(generate_outputs.scores, dim=1)  # (batch_size, seq_len, vocab_size)
+    entropies = compute_entropy(logits)   # (batch_size, seq_len)
+
+    # 4. 统计指标
+    results = []
+    all_lengths = []
+    correct_lengths = []
+    incorrect_lengths = []
+
+    for i in range(len(prompt_strs)):
+        reward_info = r1_zero_reward_fn(generated_responses[i], output_strs[i])
+        actual_gen_len = (gen_tokens[i] != tokenizer.pad_token_id).sum().item()
+        avg_entropy = entropies[i, :actual_gen_len].mean().item() if actual_gen_len > 0 else 0.0
+
+        all_lengths.append(actual_gen_len)
+        is_correct = reward_info["reward"]
+        if is_correct:
+            correct_lengths.append(actual_gen_len)
+        else:
+            incorrect_lengths.append(actual_gen_len)
+
+        results.append({
+            "prompt": prompt_strs[i],
+            "generation": generated_responses[i],
+            "ground_truth": output_strs[i],
+            "reward": is_correct,
+            "reward_info": reward_info,
+            "entropy": avg_entropy
+        })
+
+    # 5. 汇总指标
+    metrics = {
+        "avg_response_length": sum(all_lengths) / len(all_lengths),
+        "avg_correct_length": sum(correct_lengths) / len(correct_lengths) if correct_lengths else 0.0,
+        "avg_incorrect_length": sum(incorrect_lengths) / len(incorrect_lengths) if incorrect_lengths else 0.0,
+        "avg_entropy": entropies.mean().item(),
+        "samples": results
+    }
+
+    model.train()  # 恢复训练模式
+    return metrics
