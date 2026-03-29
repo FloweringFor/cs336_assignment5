@@ -84,7 +84,7 @@ def read_json(path):
 
 def load_model(model_id, json_path, save_path):
     prompts, ground_truths = read_json(json_path)
-    model = LLM(model=model_id)
+    model = LLM(model=model_id, dtype="bfloat16")
     sampling_params = SamplingParams(
         temperature=1.0,
         top_p=1.0,
