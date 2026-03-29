@@ -1,5 +1,5 @@
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedTokenizer, PreTrainedModel
 import torch.functional as F
 
 """
@@ -50,4 +50,34 @@ def tokenize_prompt_and_output(
         "labels": input_ids_padded[:, 1:],
         "response_mask": mask_padded[:, 1:]
     }
+
+
+@torch.no_grad()
+def compute_entropy(
+        logits: torch.Tensor  # Tensor of shape (batch_size, seq_len, vocab_size) containing unnormalized logits
+) -> torch.Tensor:
+    """
+    这里计算的 熵（Entropy）是 衡量一个分布内部的混乱程度
+    注意和交叉熵 （Cross Entropy）区分开来
+    """
+    log_z = torch.logsumexp(logits, dim=-1, keepdim=True)
+    probs = torch.softmax(logits, dim=-1)
+    return - torch.sum(probs * (logits - log_z), dim=-1)
+
+
+@torch.no_grad()
+def get_response_log_probs(
+        model: PreTrainedModel,
+        input_ids: torch.Tensor,
+        labels: torch.Tensor,
+        return_token_entropy: bool = False,
+) -> dict[str, torch.Tensor]:
+    model.eval()
+    logits = model(input_ids).logits
+    log_probs_all = logits - torch.logsumexp(logits, dim=-1, keepdim=True)
+    log_probs = torch.gather(log_probs_all, dim=-1, index=labels.unsqueeze(-1)).squeeze(-1)
+    result = {'log_probs': log_probs}
+    if return_token_entropy:
+        result['token_entropy'] = compute_entropy(logits)
+    return result
 
