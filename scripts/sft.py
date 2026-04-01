@@ -70,14 +70,12 @@ def compute_entropy(
     return - torch.sum(probs * (logits - log_z), dim=-1)
 
 
-@torch.no_grad()
 def get_response_log_probs(
         model: PreTrainedModel,
         input_ids: torch.Tensor,
         labels: torch.Tensor,
         return_token_entropy: bool = False,
 ) -> dict[str, torch.Tensor]:
-    model.eval()
     logits = model(input_ids).logits
     log_probs_all = logits - torch.logsumexp(logits, dim=-1, keepdim=True)
     log_probs = torch.gather(log_probs_all, dim=-1, index=labels.unsqueeze(-1)).squeeze(-1)
@@ -129,6 +127,10 @@ def log_generations(
 ) -> dict:
     model.eval()
 
+    # 切换到 Left Padding 用于生成
+    old_padding_side = tokenizer.padding_side
+    tokenizer.padding_side = "left"
+
     # 1. 准备输入 (仅针对 Prompt 部分进行编码，用于 generate)
     inputs = tokenizer(prompt_strs, return_tensors="pt", padding=True).to(device)
     inputs_ids = inputs.input_ids
@@ -136,7 +138,7 @@ def log_generations(
 
     # 2. 模型生成响应
     generate_outputs = model.generate(
-        inputs_ids=inputs_ids,
+        input_ids=inputs_ids,
         attention_mask=attention_mask,
         **generation_config,
         return_dict_in_generate=True,
@@ -152,31 +154,29 @@ def log_generations(
     entropies = compute_entropy(logits)   # (batch_size, seq_len)
 
     # 4. 统计指标
-    results = []
     all_lengths = []
     correct_lengths = []
     incorrect_lengths = []
+    correct_count = 0
+    answer_count = 0
+    format_count = 0
 
     for i in range(len(prompt_strs)):
         reward_info = r1_zero_reward_fn(generated_responses[i], output_strs[i])
         actual_gen_len = (gen_tokens[i] != tokenizer.pad_token_id).sum().item()
-        avg_entropy = entropies[i, :actual_gen_len].mean().item() if actual_gen_len > 0 else 0.0
 
         all_lengths.append(actual_gen_len)
-        is_correct = reward_info["reward"]
-        if is_correct:
+        if reward_info["reward"] > 0:
             correct_lengths.append(actual_gen_len)
+            correct_count += 1
         else:
             incorrect_lengths.append(actual_gen_len)
 
-        results.append({
-            "prompt": prompt_strs[i],
-            "generation": generated_responses[i],
-            "ground_truth": output_strs[i],
-            "reward": is_correct,
-            "reward_info": reward_info,
-            "entropy": avg_entropy
-        })
+        if reward_info["format_reward"]:
+            format_count += 1
+
+        if reward_info["answer_reward"]:
+            answer_count += 1
 
     # 5. 汇总指标
     metrics = {
@@ -184,47 +184,14 @@ def log_generations(
         "avg_correct_length": sum(correct_lengths) / len(correct_lengths) if correct_lengths else 0.0,
         "avg_incorrect_length": sum(incorrect_lengths) / len(incorrect_lengths) if incorrect_lengths else 0.0,
         "avg_entropy": entropies.mean().item(),
-        "samples": results
+        "accuracy": correct_count / len(all_lengths),
+        "answer accuracy": answer_count / len(all_lengths),
+        "format accuracy": format_count / len(all_lengths)
     }
 
+    # 恢复环境，切换回 Right Padding 用于训练
+    tokenizer.padding_side = old_padding_side
     model.train()  # 恢复训练模式
+
     return metrics
-
-
-def init_vllm(model_id: str, device: str, seed: int, gpu_memory_utilization: float = 0.85):
-    """
-        Start the inference process, here we use vLLM to hold a model on
-        a GPU separate from the policy.
-    """
-    vllm_set_random_seed(seed)
-    # Monkeypatch from TRL:
-    # https://github.com/huggingface/trl/blob/
-    # 22759c820867c8659d00082ba8cf004e963873c1/trl/trainer/grpo_trainer.py
-    # Patch vLLM to make sure we can
-    # (1) place the vLLM model on the desired device (world_size_patch) and
-    # (2) avoid a test that is not designed for our setting (profiling_patch).
-    world_size_patch = patch("torch.distributed.get_world_size", return_value=1)
-    profiling_patch = patch(
-        "vllm.worker.worker.Worker._assert_memory_footprint_increased_during_profiling",
-        return_value=None
-    )
-    with world_size_patch, profiling_patch:
-        return LLM(
-            model=model_id,
-            device=device,
-            dtype="bfloat16",
-            enable_prefix_caching=True,
-            gpu_memory_utilization=gpu_memory_utilization,
-        )
-
-
-def load_policy_into_vllm_instance(policy: PreTrainedModel, llm: LLM):
-    """
-    Copied from https://github.com/huggingface/trl/blob/
-    22759c820867c8659d00082ba8cf004e963873c1/trl/trainer/grpo_trainer.py#L670.
-    """
-    state_dict = policy.state_dict()
-    llm_model = llm.llm_engine.model_executor.driver_worker.model_runner.model
-    llm_model.load_weights(state_dict.items())
-
 

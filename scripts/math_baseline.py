@@ -1,7 +1,7 @@
 import os
 import json
 from vllm import LLM, SamplingParams
-from typing import Callable, List
+from typing import Callable, List, Any
 
 from cs336_alignment.drgrpo_grader import r1_zero_reward_fn
 
@@ -27,7 +27,7 @@ def evaluate_vllm(
         ground_truths: List[str],
         eval_sampling_params: SamplingParams,
         results_path
-) -> None:
+) -> tuple[float | Any, float | Any, float | Any]:
     # 1、调用 vLLM 批量生成答案
     outputs = vllm_model.generate(prompts, eval_sampling_params)
 
@@ -59,6 +59,7 @@ def evaluate_vllm(
     print(f"Zero-shot Answer Accuracy: {answer_accuracy:.2%}")
     print("-" * 30)
 
+    """
     # 4、序列化到磁盘 (JSONL 格式)
     # 确保存储目录存在
     os.makedirs(os.path.dirname(os.path.abspath(results_path)), exist_ok=True)
@@ -69,6 +70,8 @@ def evaluate_vllm(
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
     print(f"✅ 结果已成功保存至: {results_path}")
+    """
+    return accuracy, format_accuracy, answer_accuracy
 
 
 def read_json(path):
@@ -84,7 +87,7 @@ def read_json(path):
 
 def load_model(model_id, json_path, save_path):
     prompts, ground_truths = read_json(json_path)
-    model = LLM(model=model_id, dtype="bfloat16")
+    model = LLM(model=model_id, device="auto", dtype="bfloat16", gpu_memory_utilization=0.8)
     sampling_params = SamplingParams(
         temperature=1.0,
         top_p=1.0,
@@ -92,11 +95,11 @@ def load_model(model_id, json_path, save_path):
         stop=["</answer>"],
         include_stop_str_in_output=True
     )
-    evaluate_vllm(model, r1_zero_reward_fn, prompts, ground_truths, sampling_params, save_path)
+    return evaluate_vllm(model, r1_zero_reward_fn, prompts, ground_truths, sampling_params, save_path)
 
 
 if __name__ == "__main__":
-    model = "Qwen/Qwen2.5-Math-1.5B"
+    model_id = "Qwen/Qwen2.5-Math-1.5B"
     read_path = "../data/MATH/validation.jsonl"
     save_path = "../data/MATH/results_validation.jsonl"
-    load_model(model, read_path, save_path)
+    load_model(model_id, read_path, save_path)
