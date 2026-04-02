@@ -224,7 +224,7 @@ def load_policy_into_vllm_instance(policy: PreTrainedModel, llm: LLM):
 
 
 if __name__ == "__main__":
-    # sft_filter()
-    # run_sft()
+    sft_filter()
+    run_sft()
     evaluate("sft_full")
 
