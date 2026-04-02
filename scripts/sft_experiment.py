@@ -16,36 +16,33 @@ from sft import tokenize_prompt_and_output, get_response_log_probs, sft_microbat
 from math_baseline import load_model
 
 
-# --- 1. 配置参数 ---
-MODEL_ID = "Qwen/Qwen2.5-Math-1.5B"
-RAW_DATA_PATH = "/root/autodl-tmp/cs336_assignment5/data/MATH/sft.jsonl"
-FILTER_DATA_PATH = "/root/autodl-tmp/cs336_assignment5/data/MATH/sft_filter.jsonl"
-VAL_DATA_PATH = "/root/autodl-tmp/cs336_assignment5/data/MATH/validation.jsonl"
-VAL_RESULT_PATH = "/root/autodl-tmp/cs336_assignment5/data/MATH/result"
-CHECKPOINTS_PATH = "/root/autodl-tmp/cs336_assignment5/checkpoints"
-MAX_GRAD_NORM = 1.0
-LEARNING_RATE = 3e-5
-BATCH_SIZE = 32
-GRAD_ACCUM = 8
-EPOCHS = 10
-
-
 # 任务 2 的过滤逻辑
-def sft_filter():
+def sft_filter(raw_data_path, filter_data_path):
     results = []
-    with open(RAW_DATA_PATH, "r") as f:
+    with open(raw_data_path, "r") as f:
         for line in f:
             data = json.loads(line)
             reward = r1_zero_reward_fn(data["response"], data["ground_truth"])
             if reward["reward"] > 0:
                 results.append(data)
 
-    with open(FILTER_DATA_PATH, "w") as f:
+    with open(filter_data_path, "w") as f:
         for entry in results:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
-def run_sft(dataset_size=None, is_filtered=False):
+def run_sft(
+        learning_rate,
+        batch_size,
+        model_id,
+        filter_data_path,
+        checkpoints_path,
+        epochs,
+        grad_accum,
+        max_grad_norm,
+        dataset_size=None,
+        is_filtered=False
+):
     # 初始化wandb
     run_name = f"sft_{dataset_size if dataset_size else 'full'}"
     if is_filtered: run_name += "_filtered"
@@ -54,19 +51,19 @@ def run_sft(dataset_size=None, is_filtered=False):
         project="cs336-a5-sft",
         name=run_name,
         config={
-            "lr": LEARNING_RATE,
-            "batch_size": BATCH_SIZE,
+            "lr": learning_rate,
+            "batch_size": batch_size,
             "dataset_size": dataset_size
         }
     )
 
     # 加载模型和Tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
+    tokenizer = AutoTokenizer.from_pretrained(model_id)
     tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"  # 训练用right
 
     model = AutoModelForCausalLM.from_pretrained(
-        MODEL_ID,
+        model_id,
         torch_dtype=torch.bfloat16,
         device_map="auto",
         attn_implementation="flash_attention_2"
@@ -76,7 +73,7 @@ def run_sft(dataset_size=None, is_filtered=False):
     model.gradient_checkpointing_enable()
 
     # --- 2. 数据处理 ---
-    with open(FILTER_DATA_PATH, "r") as f:
+    with open(filter_data_path, "r") as f:
         all_data = [json.loads(line) for line in f]
 
     # 任务 1 的规模放缩
@@ -85,9 +82,9 @@ def run_sft(dataset_size=None, is_filtered=False):
 
     print(f"Training on {len(all_data)} samples...")
 
-    optimizer = AdamW(model.parameters(), lr=LEARNING_RATE)
+    optimizer = AdamW(model.parameters(), lr=learning_rate)
 
-    total_steps = (len(all_data) // (BATCH_SIZE * GRAD_ACCUM)) * EPOCHS
+    total_steps = (len(all_data) // (batch_size * grad_accum)) * epochs
     num_warmup_steps = int(0.1 * total_steps)
     scheduler = get_cosine_schedule_with_warmup(
         optimizer=optimizer,
@@ -101,10 +98,10 @@ def run_sft(dataset_size=None, is_filtered=False):
     model.train()
     global_steps = 0
     running_loss = 0
-    for epoch in range(EPOCHS):
+    for epoch in range(epochs):
         random.shuffle(all_data)
-        for i in range(0, len(all_data), BATCH_SIZE):
-            batch = all_data[i:i + BATCH_SIZE]
+        for i in range(0, len(all_data), batch_size):
+            batch = all_data[i:i + batch_size]
             prompts = [b["prompt"] for b in batch]
             outputs = [b["response"] for b in batch]
             tokenizer_data = tokenize_prompt_and_output(
@@ -122,19 +119,19 @@ def run_sft(dataset_size=None, is_filtered=False):
             loss, _ = sft_microbatch_train_step(
                 policy_log_probs=log_probs,
                 response_mask=response_mask,
-                gradient_accumulation_steps=GRAD_ACCUM,
+                gradient_accumulation_steps=grad_accum,
             )
             running_loss += loss.item()
 
-            if (global_steps + 1) % GRAD_ACCUM == 0:
+            if (global_steps + 1) % grad_accum == 0:
                 # --- 核心要求：梯度裁剪 ---
-                clip_grad_norm_(model.parameters(), MAX_GRAD_NORM)
+                clip_grad_norm_(model.parameters(), max_grad_norm)
                 optimizer.step()
                 scheduler.step()
                 optimizer.zero_grad()
 
                 # 这里的 running_loss 已经是这一组累积步的平均值了
-                wandb.log({"train/loss": running_loss, "step": (global_steps + 1) // GRAD_ACCUM})
+                wandb.log({"train/loss": running_loss, "step": (global_steps + 1) // grad_accum})
                 running_loss = 0
                 """
                 metric = log_generations(
@@ -154,24 +151,30 @@ def run_sft(dataset_size=None, is_filtered=False):
                 )
                 wandb.log(metric)
                 """
-
             global_steps += 1
 
-        checkpoint_dir = f"{CHECKPOINTS_PATH}/{run_name}_epoch_{epoch + 1}"
+        checkpoint_dir = f"{checkpoints_path}/{run_name}_epoch_{epoch + 1}"
         os.makedirs(checkpoint_dir, exist_ok=True)
         model.save_pretrained(checkpoint_dir)
         tokenizer.save_pretrained(checkpoint_dir)
 
     wandb.finish()
+    return run_name
 
 
-def evaluate(run_name):
+def evaluate(
+        run_name,
+        epochs,
+        val_data_path,
+        val_result_path,
+        checkpoints_path,
+):
     results = []
-    results_path = f"{VAL_RESULT_PATH}/results.jsonl"
-    for epoch in range(EPOCHS):
-        checkpoint_dir = os.path.abspath(f"{CHECKPOINTS_PATH}/{run_name}_epoch_{epoch + 1}")
+    results_path = f"{val_result_path}/results.jsonl"
+    for epoch in range(epochs):
+        checkpoint_dir = os.path.abspath(f"{checkpoints_path}/{run_name}_epoch_{epoch + 1}")
         accuracy, format_accuracy, answer_accuracy = \
-            load_model(checkpoint_dir, VAL_DATA_PATH, f"{VAL_RESULT_PATH}/{run_name}_epoch_{epoch + 1}_val_result.json")
+            load_model(checkpoint_dir, val_data_path, f"{val_result_path}/{run_name}_epoch_{epoch + 1}_val_result.json")
         results.append({
             "name": f"{run_name}_epoch_{epoch + 1}",
             "accuracy": accuracy,
@@ -224,7 +227,34 @@ def load_policy_into_vllm_instance(policy: PreTrainedModel, llm: LLM):
 
 
 if __name__ == "__main__":
-    sft_filter()
-    run_sft()
-    evaluate("sft_full")
+    # 参数配置
+    MODEL_ID = "Qwen/Qwen2.5-Math-1.5B"
+    RAW_DATA_PATH = "/root/autodl-tmp/cs336_assignment5/data/MATH/sft.jsonl"
+    FILTER_DATA_PATH = "/root/autodl-tmp/cs336_assignment5/data/MATH/sft_filter.jsonl"
+    VAL_DATA_PATH = "/root/autodl-tmp/cs336_assignment5/data/MATH/validation.jsonl"
+    VAL_RESULT_PATH = "/root/autodl-tmp/cs336_assignment5/data/MATH/result"
+    CHECKPOINTS_PATH = "/root/autodl-tmp/cs336_assignment5/checkpoints"
+    MAX_GRAD_NORM = 1.0
+    LEARNING_RATE = 3e-5
+    BATCH_SIZE = 32
+    GRAD_ACCUM = 8
+    EPOCHS = 10
+    sft_filter(raw_data_path=RAW_DATA_PATH, filter_data_path=FILTER_DATA_PATH)
+    run_name = run_sft(
+        learning_rate=LEARNING_RATE,
+        batch_size=BATCH_SIZE,
+        model_id=MODEL_ID,
+        filter_data_path=FILTER_DATA_PATH,
+        checkpoints_path=CHECKPOINTS_PATH,
+        epochs=EPOCHS,
+        grad_accum=GRAD_ACCUM,
+        max_grad_norm=MAX_GRAD_NORM
+    )
+    evaluate(
+        run_name=run_name,
+        epochs=EPOCHS,
+        val_data_path=VAL_DATA_PATH,
+        val_result_path=VAL_RESULT_PATH,
+        checkpoints_path=CHECKPOINTS_PATH
+    )
 
