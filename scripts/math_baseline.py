@@ -26,8 +26,8 @@ def evaluate_vllm(
         prompts: List[str],
         ground_truths: List[str],
         eval_sampling_params: SamplingParams,
-        save,
-        results_path
+        save=False,
+        results_path=None
 ) -> tuple[float | Any, float | Any, float | Any]:
     # 1、调用 vLLM 批量生成答案
     outputs = vllm_model.generate(prompts, eval_sampling_params)
@@ -55,11 +55,11 @@ def evaluate_vllm(
     format_accuracy = sum(r["format_correct"] for r in results) / len(results)
     answer_accuracy = sum(r["answer_correct"] for r in results) / len(results)
     print("-" * 30)
-    print(f"Zero-shot Accuracy: {accuracy:.2%}")
-    print(f"Zero-shot Format Accuracy: {format_accuracy:.2%}")
-    print(f"Zero-shot Answer Accuracy: {answer_accuracy:.2%}")
+    print(f"本次测试的总数据量: {len(results)}")
+    print(f"Accuracy: {accuracy:.2%}")
+    print(f"Format Accuracy: {format_accuracy:.2%}")
+    print(f"Answer Accuracy: {answer_accuracy:.2%}")
     print("-" * 30)
-
 
     # 4、序列化到磁盘 (JSONL 格式)
     # 确保存储目录存在
@@ -79,27 +79,26 @@ def evaluate_vllm(
 def read_train_val_json(path):
     prompts = []
     ground_truths = []
-    levels = []
     with open(path, 'r') as f:
         for line in f:
             data = json.loads(line)
             prompts.append(format_prompt(data["problem"]))
             ground_truths.append(data["answer"])
-            levels.append(data["level"])
-    return prompts, ground_truths, levels
+    return prompts, ground_truths
 
 
 def load_model(model_id, json_path, save_path, save):
-    prompts, ground_truths, levels = read_train_val_json(json_path)
-    model = LLM(model=model_id, device="auto", dtype="bfloat16", gpu_memory_utilization=0.8)
+    prompts, ground_truths = read_train_val_json(json_path)
+    model = LLM(model=model_id, device="auto", dtype="bfloat16", gpu_memory_utilization=0.85)
     sampling_params = SamplingParams(
-        temperature=1.0,
-        top_p=1.0,
+        temperature=0.8,
+        top_p=0.9,
         max_tokens=1024,
         stop=["</answer>"],
-        include_stop_str_in_output=True
+        include_stop_str_in_output=True,
+        seed=42
     )
-    return evaluate_vllm(model, r1_zero_reward_fn, prompts, ground_truths, sampling_params, save_path, save)
+    return evaluate_vllm(model, r1_zero_reward_fn, prompts, ground_truths, sampling_params, save, save_path)
 
 
 if __name__ == "__main__":

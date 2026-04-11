@@ -36,6 +36,7 @@ def run_sft(
         batch_size,
         model_id,
         filter_data_path,
+        enhance_data_path,
         checkpoints_path,
         epochs,
         grad_accum,
@@ -75,6 +76,9 @@ def run_sft(
     # --- 2. 数据处理 ---
     with open(filter_data_path, "r") as f:
         all_data = [json.loads(line) for line in f]
+
+    with open(enhance_data_path, "r") as f:
+        all_data += [json.loads(line) for line in f]
 
     # 任务 1 的规模放缩
     if dataset_size is not None and dataset_size < len(all_data):
@@ -174,7 +178,8 @@ def evaluate(
     for epoch in range(epochs):
         checkpoint_dir = os.path.abspath(f"{checkpoints_path}/{run_name}_epoch_{epoch + 1}")
         accuracy, format_accuracy, answer_accuracy = \
-            load_model(checkpoint_dir, val_data_path, f"{val_result_path}/{run_name}_epoch_{epoch + 1}_val_result.json")
+            load_model(checkpoint_dir, val_data_path,
+                       f"{val_result_path}/{run_name}_epoch_{epoch + 1}_val_result.json", False)
         results.append({
             "name": f"{run_name}_epoch_{epoch + 1}",
             "accuracy": accuracy,
@@ -228,28 +233,34 @@ def load_policy_into_vllm_instance(policy: PreTrainedModel, llm: LLM):
 
 if __name__ == "__main__":
     # 参数配置
-    MODEL_ID = "Qwen/Qwen2.5-Math-1.5B"
-    RAW_DATA_PATH = "/root/autodl-tmp/cs336_assignment5/data/MATH/sft.jsonl"
+    # MODEL_ID = "Qwen/Qwen2.5-Math-1.5B"
+    MODEL_ID = "/root/autodl-tmp/cs336_assignment5/checkpoints/ei_best_7"
     FILTER_DATA_PATH = "/root/autodl-tmp/cs336_assignment5/data/MATH/sft_filter.jsonl"
+    # ENHANCE_DATA_PATH = "/root/autodl-tmp/cs336_assignment5/data/MATH/train/train_levels_sft.jsonl"
+    ENHANCE_DATA_PATH = "/root/autodl-tmp/cs336_assignment5/data/MATH/train/train_subjects_sft.jsonl"
     VAL_DATA_PATH = "/root/autodl-tmp/cs336_assignment5/data/MATH/validation.jsonl"
     VAL_RESULT_PATH = "/root/autodl-tmp/cs336_assignment5/data/MATH/result"
     CHECKPOINTS_PATH = "/root/autodl-tmp/cs336_assignment5/checkpoints"
     MAX_GRAD_NORM = 1.0
     LEARNING_RATE = 3e-5
-    BATCH_SIZE = 32
-    GRAD_ACCUM = 8
-    EPOCHS = 10
-    sft_filter(raw_data_path=RAW_DATA_PATH, filter_data_path=FILTER_DATA_PATH)
+    BATCH_SIZE = 8
+    GRAD_ACCUM = 16
+    EPOCHS = 3
+    # sft_filter(raw_data_path=RAW_DATA_PATH, filter_data_path=FILTER_DATA_PATH)
+    """
     run_name = run_sft(
         learning_rate=LEARNING_RATE,
         batch_size=BATCH_SIZE,
         model_id=MODEL_ID,
         filter_data_path=FILTER_DATA_PATH,
+        enhance_data_path=ENHANCE_DATA_PATH,
         checkpoints_path=CHECKPOINTS_PATH,
         epochs=EPOCHS,
         grad_accum=GRAD_ACCUM,
         max_grad_norm=MAX_GRAD_NORM
     )
+    """
+    run_name = "sft_full"
     evaluate(
         run_name=run_name,
         epochs=EPOCHS,
