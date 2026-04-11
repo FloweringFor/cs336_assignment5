@@ -1,5 +1,5 @@
 import torch
-from collections.abc import Callable
+from typing import Any, Callable, Literal
 
 
 def compute_group_normalized_rewards(
@@ -61,3 +61,29 @@ def compute_grpo_clip_loss(
         "max_ratio": ratio.max()
     }
     return loss, metadata
+
+
+def compute_policy_gradient_loss(
+    policy_log_probs: torch.Tensor,
+    loss_type: Literal["no_baseline", "reinforce_with_baseline", "grpo_clip"],
+    raw_rewards: torch.Tensor | None = None,
+    advantages: torch.Tensor | None = None,
+    old_log_probs: torch.Tensor | None = None,
+    cliprange: float | None = None,
+) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+    metadata = {}
+    if loss_type == "no_baseline":
+        assert raw_rewards is not None, "raw_rewards is required for no_baseline"
+        loss = compute_naive_policy_gradient_loss(raw_rewards, policy_log_probs)
+    elif loss_type == "reinforce_with_baseline":
+        assert advantages is not None, "advantages is required for grpo_clip"
+        loss = compute_naive_policy_gradient_loss(advantages, policy_log_probs)
+    elif loss_type == "grpo_clip":
+        assert advantages is not None, "advantages is required for grpo_clip"
+        assert old_log_probs is not None, "old_log_probs is required for grpo_clip"
+        assert cliprange is not None, "cliprange is required for grpo_clip"
+        loss, metadata = compute_grpo_clip_loss(advantages, policy_log_probs, old_log_probs, cliprange)
+    else:
+        raise ValueError(f"Unknown loss_type: {loss_type}")
+    return loss, metadata
+
