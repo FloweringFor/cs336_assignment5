@@ -1047,6 +1047,32 @@ def r1_zero_reward_fn(response, ground_truth, fast=True):
         }
 
 
+def my_reward_fn(response, ground_truth, fast=True):
+    result = r1_zero_reward_fn(response, ground_truth, fast)
+    total_reward = 0
+    if result["reward"] > 0:
+        total_reward += 1.0
+    elif result["format_reward"] > 0:
+        total_reward += 0.2
+    if result["format_reward"] > 0:
+        think_content = response.split("</think>")[0]
+        total_reward += get_len_reward(len(think_content))
+    result["reward"] = total_reward
+    return result
+
+
+def get_len_reward(think_len):
+    if think_len < 128:
+        # 基础长度鼓励
+        return (think_len / 128) * 0.05
+    elif think_len < 512:
+        # 核心推理区，奖励提升较快
+        return 0.05 + ((think_len - 128) / (512 - 128)) * 0.1
+    else:
+        # 高阶推理区，缓慢逼近上限
+        return 0.15 + min(((think_len - 512) / (1024 - 512)) * 0.05, 0.05)
+
+
 def question_only_reward_fn(response, ground_truth, fast=True):
     model_answer = extract_answer(response)
     if model_answer is None:

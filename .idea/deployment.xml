@@ -16,6 +16,13 @@
           </mappings>
         </serverdata>
       </paths>
+      <paths name="root@connect.bjb1.seetacloud.com:36855">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/tmp/pycharm_project_895" local="$PROJECT_DIR$" />
+          </mappings>
+        </serverdata>
+      </paths>
       <paths name="root@connect.bjb1.seetacloud.com:46384">
         <serverdata>
           <mappings>
@@ -34,13 +41,6 @@
         <serverdata>
           <mappings>
             <mapping deploy="/tmp/pycharm_project_556" local="$PROJECT_DIR$" />
-          </mappings>
-        </serverdata>
-      </paths>
-      <paths name="root@connect.westd.seetacloud.com:44185">
-        <serverdata>
-          <mappings>
-            <mapping deploy="/tmp/pycharm_project_695" local="$PROJECT_DIR$" />
           </mappings>
         </serverdata>
       </paths>

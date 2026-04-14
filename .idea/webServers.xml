@@ -3,7 +3,7 @@
   <component name="WebServers">
     <option name="servers">
       <webServer id="9739b9fd-a460-49bf-9249-47a5f74f9936" name="autodl_cs336_a5">
-        <fileTransfer accessType="SFTP" host="connect.bjb1.seetacloud.com" port="22043" sshConfigId="1a95f639-038c-40a2-a0ed-f889ad16e31e" sshConfig="root@connect.bjb1.seetacloud.com:22043 password">
+        <fileTransfer accessType="SFTP" host="connect.bjb1.seetacloud.com" port="36855" sshConfigId="692e598c-f1a8-4272-8bc9-f9055ef997e3" sshConfig="root@connect.bjb1.seetacloud.com:36855 password">
           <advancedOptions>
             <advancedOptions dataProtectionLevel="Private" passiveMode="true" shareSSLContext="true" />
           </advancedOptions>

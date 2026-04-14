@@ -102,7 +102,12 @@ def load_model(model_id, json_path, save_path, save):
 
 
 if __name__ == "__main__":
-    model_id = "Qwen/Qwen2.5-Math-1.5B"
-    read_path = "../data/MATH/validation.jsonl"
-    save_path = "../data/MATH/results_validation.jsonl"
+    # model_id = "/root/autodl-tmp/cs336_assignment5/checkpoints/math_grpo_450"
+    # model_id = "Qwen/Qwen2.5-Math-1.5B"
+    # model_id = "/root/autodl-tmp/cs336_assignment5/checkpoints/math_sft_best"
+    model_id = "/root/autodl-tmp/cs336_assignment5/checkpoints/ei_best_8"
+    read_path = "/root/autodl-tmp/cs336_assignment5/data/MATH/validation.jsonl"
+    save_path = "/root/autodl-tmp/cs336_assignment5/data/MATH/results_validation.jsonl"
     load_model(model_id, read_path, save_path, False)
+
+

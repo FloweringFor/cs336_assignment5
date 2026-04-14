@@ -15,6 +15,7 @@ def compute_group_normalized_rewards(
         score_dict = reward_fn(resp, gt)
         raw_rewards_list.append(score_dict["reward"])
     raw_rewards = torch.tensor(raw_rewards_list, dtype=torch.float32)
+    # print(f"DEBUG Raw Rewards (first 8): {raw_rewards[:8]}")
     grouped_rewards = raw_rewards.view(-1, group_size)    # (n_prompts, group_size)
     mean_r = grouped_rewards.mean(dim=-1, keepdim=True)   # (n_prompts, 1)
     if normalize_by_std:
@@ -99,6 +100,20 @@ def masked_mean(
     return total_sum / count
 
 
+def masked_normalize(
+    tensor: torch.Tensor,
+    mask: torch.Tensor,
+    dim: int | None = None,
+    constant_normalizer: float | None = None,
+):
+    if constant_normalizer is None:
+        return masked_mean(tensor, mask, dim)
+    else:
+        masked_tensor = tensor * mask
+        total_sum = masked_tensor.sum(dim=dim)
+        return total_sum / constant_normalizer
+
+
 def grpo_microbatch_train_step(
     policy_log_probs: torch.Tensor,
     response_mask: torch.Tensor,
@@ -108,6 +123,7 @@ def grpo_microbatch_train_step(
     advantages: torch.Tensor | None = None,
     old_log_probs: torch.Tensor | None = None,
     cliprange: float | None = None,
+    constant_normalizer: float | None = None,
 ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
     per_token_loss, metadata = compute_policy_gradient_loss(
         policy_log_probs=policy_log_probs,
@@ -117,7 +133,8 @@ def grpo_microbatch_train_step(
         old_log_probs=old_log_probs,
         cliprange=cliprange
     )
-    masked_loss = masked_mean(per_token_loss, response_mask)
+    # masked_loss = masked_mean(per_token_loss, response_mask)
+    masked_loss = masked_normalize(per_token_loss, response_mask, 1, constant_normalizer).mean()
     loss = masked_loss / gradient_accumulation_steps
     loss.backward()
 
